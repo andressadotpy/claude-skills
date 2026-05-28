@@ -7,6 +7,14 @@ argument-hint: "[Gerrit change number or URL]"
 inherits: 
   - openstack-engineer
   - openstack-swift-engineer
+permission_hints:
+  - tool: Bash
+    patterns:
+      - "curl.*review.opendev.org.*"
+      - "curl.*https://review.opendev.org/changes/.*"
+  - tool: WebFetch
+    patterns:
+      - "https://review.opendev.org/.*"
 ---
 
 # OpenStack Swift Code Review (Gerrit)
@@ -55,7 +63,19 @@ Well-documented - the docstring really helps understand the intent
 
 ### Step 1: Fetch and Analyze Patch
 
-User runs in SAIO:
+**Automatic fetch from Gerrit** - Claude will automatically fetch the patch details when given a change number or URL.
+
+For Gerrit URLs like `https://review.opendev.org/c/openstack/swift/+/966980`, extract the change number (966980).
+
+Claude will fetch:
+1. Patch metadata: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail`
+2. Commit message and description from the fetched metadata
+3. File list: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files`
+4. Diff for each file: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files/<file-path>/diff`
+
+**Note**: Gerrit API responses start with `)]}'` to prevent XSSI attacks - Claude should strip this prefix before parsing JSON.
+
+After fetching, user runs in SAIO:
 ```bash
 git review -d <change-number>
 git log --oneline -3
