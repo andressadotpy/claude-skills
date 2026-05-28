@@ -67,13 +67,82 @@ Well-documented - the docstring really helps understand the intent
 
 For Gerrit URLs like `https://review.opendev.org/c/openstack/swift/+/966980`, extract the change number (966980).
 
-Claude will fetch:
-1. Patch metadata: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail`
-2. Commit message and description from the fetched metadata
-3. File list: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files`
-4. Diff for each file: `gh api https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files/<file-path>/diff`
+**Claude will automatically fetch:**
 
-**Note**: Gerrit API responses start with `)]}'` to prevent XSSI attacks - Claude should strip this prefix before parsing JSON.
+1. **Patch metadata**:
+   ```bash
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d'
+   ```
+
+2. **Commit message**:
+   ```bash
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/commit' | sed '1d' | jq -r '.message'
+   ```
+
+3. **File list**:
+   ```bash
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files/' | sed '1d' | jq 'keys | .[]'
+   ```
+
+4. **All review comments** (including unresolved discussions):
+   ```bash
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/comments' | sed '1d'
+   ```
+
+5. **Review messages** (patchset-level comments):
+   ```bash
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d' | jq -r '.messages[]'
+   ```
+
+**Note**: Gerrit API responses start with `)]}'` to prevent XSSI attacks - Claude must strip this prefix with `sed '1d'` before parsing JSON.
+
+**Identify Unresolved Discussions**:
+- Comments without a "Done" or "Acknowledged" response from the patch author
+- Ongoing technical debates between reviewers
+- Questions that haven't been answered
+- Suggestions that haven't been addressed
+
+**Summarize Previous Review Findings**:
+
+Claude will analyze and summarize:
+1. **Open Questions**: Questions from reviewers that need answers
+2. **Unresolved Concerns**: Technical concerns or requirements not yet addressed
+3. **Ongoing Debates**: Discussions between reviewers about approach/design
+4. **Suggestions Pending**: Improvements suggested but not yet implemented
+5. **Test Coverage Gaps**: Areas where reviewers requested additional tests
+
+Present this summary in a structured format:
+
+```
+=== UNRESOLVED DISCUSSIONS FROM PREVIOUS REVIEWS ===
+
+OPEN QUESTIONS:
+- [Reviewer Name, Line X, File Y]: Question text
+  Status: Awaiting response from author
+
+UNRESOLVED REQUIREMENTS:
+- [Reviewer Name]: Requirement description
+  Status: Not addressed in current patchset
+
+ONGOING DEBATES:
+- Topic: [Brief description]
+  Participants: [Reviewer 1, Reviewer 2]
+  Summary: [Key points from both sides]
+  Status: No consensus reached
+
+PENDING SUGGESTIONS:
+- [Reviewer Name, Line X]: Suggestion text
+  Status: Not implemented
+
+TEST COVERAGE GAPS:
+- [Area]: Requested test coverage
+  Status: Tests not added
+```
+
+After presenting the summary, ask the user:
+1. "Would you like me to analyze any specific discussion thread in detail?"
+2. "Do you want to contribute to any of these open discussions in your review?"
+3. "Would you like step-by-step instructions to reproduce any of these findings in SAIO?"
 
 After fetching, user runs in SAIO:
 ```bash
