@@ -21,7 +21,19 @@ permission_hints:
 
 Perform a thorough, empathic code review for OpenStack Swift patches on Gerrit.
 
-**IMPORTANT**: All bash commands in this skill (git, .unittests, swift-init, etc.) are executed by the user inside the SAIO machine, not by Claude. Claude provides guidance and analysis, while the user runs the commands and reports results back.
+**CRITICAL INSTRUCTIONS FOR CLAUDE**:
+
+1. **INTERACTIVE MODE**: This skill uses a **step-by-step, checkpoint-based** review process
+2. **ALWAYS ASK BEFORE PROCEEDING**: After each phase, ASK the user if they want to continue
+3. **NEVER DUMP ALL OUTPUT AT ONCE**: Break the review into manageable phases
+4. **WAIT FOR USER CONFIRMATION**: Don't proceed to the next phase without explicit confirmation
+5. **User executes commands**: All bash commands (git, .unittests, swift-init, etc.) are executed by the user inside the SAIO machine, not by Claude
+
+**Why this approach?**
+- Keeps output focused and manageable
+- Lets the reviewer direct the depth of analysis
+- Allows questions and clarifications at each step
+- Prevents overwhelming output from full reviews
 
 ## Empathic Comment Framework
 
@@ -59,19 +71,65 @@ This refactoring makes the code much clearer
 Well-documented - the docstring really helps understand the intent
 ```
 
+## Interactive Review Flow
+
+**IMPORTANT**: This is an interactive, multi-step review process. Claude will pause at checkpoints to ask if you want to continue. This keeps output manageable and lets you direct the review.
+
+### Review Phases Overview
+
+```
+Phase 1: Patch Overview
+├─ Fetch metadata, commit message, files, diff
+├─ Summarize what the patch does
+└─ ASK: Continue to discussions? Skip to analysis? Ask questions?
+
+Phase 2: Review Discussions (optional)
+├─ User checks out patch in SAIO (git review -d <number>)
+├─ Fetch and analyze existing Gerrit comments
+├─ Summarize open questions, debates, suggestions
+└─ ASK: Dive into discussions? Proceed to analysis?
+
+Phase 3: Code Analysis
+├─ Analyze commit message quality
+├─ Test coverage (unit/probe/functional)
+└─ ASK: See test commands? Continue to quality analysis?
+
+Phase 4: Code Quality
+├─ Swift-specific patterns
+├─ General code quality
+└─ ASK: Continue to edge cases? Skip to testing? Generate summary?
+
+Phase 5: Edge Cases
+├─ Error handling analysis
+├─ Boundary conditions
+└─ ASK: Get testing instructions? Generate summary?
+
+Phase 6: SAIO Testing (optional)
+├─ Provide testing commands
+└─ ASK: Wait for results? Generate summary? Questions?
+
+Phase 7: Final Review Summary
+├─ Generate complete Gerrit comment
+├─ Include all findings (Requirements, Suggestions, Questions)
+├─ Positive observations
+└─ Recommended vote
+```
+
+**Key Principle**: Claude MUST ask before moving between phases. Never dump all analysis at once.
+
+---
+
 ## Review Steps
 
-### Step 1: Fetch and Analyze Patch
+### Step 1: Fetch Patch Overview and Summarize Changes
 
-**Automatic fetch from Gerrit** - Claude will automatically fetch the patch details when given a change number or URL.
+**FIRST STEP - Always start here when the skill is invoked.**
 
-For Gerrit URLs like `https://review.opendev.org/c/openstack/swift/+/966980`, extract the change number (966980).
-
-**Claude will automatically fetch:**
+**Claude will automatically fetch from Gerrit:**
 
 1. **Patch metadata**:
    ```bash
-   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d'
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d' | jq '{subject, status, owner, created, updated, insertions, deletions}'
    ```
 
 2. **Commit message**:
@@ -79,86 +137,164 @@ For Gerrit URLs like `https://review.opendev.org/c/openstack/swift/+/966980`, ex
    curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/commit' | sed '1d' | jq -r '.message'
    ```
 
-3. **File list**:
+3. **Files changed**:
    ```bash
-   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files/' | sed '1d' | jq 'keys | .[]'
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/files/' | sed '1d' | jq -r 'keys[]'
    ```
 
-4. **All review comments** (including unresolved discussions):
+4. **Diff content**:
    ```bash
-   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/comments' | sed '1d'
+   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/revisions/current/patch' | base64 -d
    ```
 
-5. **Review messages** (patchset-level comments):
-   ```bash
-   curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d' | jq -r '.messages[]'
-   ```
+**Note**: Gerrit API responses start with `)]}'` (XSSI protection) - strip with `sed '1d'` before parsing.
 
-**Note**: Gerrit API responses start with `)]}'` to prevent XSSI attacks - Claude must strip this prefix with `sed '1d'` before parsing JSON.
-
-**Identify Unresolved Discussions**:
-- Comments without a "Done" or "Acknowledged" response from the patch author
-- Ongoing technical debates between reviewers
-- Questions that haven't been answered
-- Suggestions that haven't been addressed
-
-**Summarize Previous Review Findings**:
-
-Claude will analyze and summarize:
-1. **Open Questions**: Questions from reviewers that need answers
-2. **Unresolved Concerns**: Technical concerns or requirements not yet addressed
-3. **Ongoing Debates**: Discussions between reviewers about approach/design
-4. **Suggestions Pending**: Improvements suggested but not yet implemented
-5. **Test Coverage Gaps**: Areas where reviewers requested additional tests
-
-Present this summary in a structured format:
+**Claude will then present a concise summary:**
 
 ```
-=== UNRESOLVED DISCUSSIONS FROM PREVIOUS REVIEWS ===
+=== PATCH OVERVIEW: <change-number> ===
 
-OPEN QUESTIONS:
-- [Reviewer Name, Line X, File Y]: Question text
-  Status: Awaiting response from author
+METADATA:
+- Author: <name>
+- Status: <NEW/MERGED/ABANDONED>
+- Lines: +<insertions> / -<deletions>
+- Created: <date>
+- Updated: <date>
 
-UNRESOLVED REQUIREMENTS:
-- [Reviewer Name]: Requirement description
-  Status: Not addressed in current patchset
+WHAT IT DOES:
+[2-3 sentence summary of the change in plain language]
 
-ONGOING DEBATES:
-- Topic: [Brief description]
-  Participants: [Reviewer 1, Reviewer 2]
-  Summary: [Key points from both sides]
-  Status: No consensus reached
+FILES CHANGED:
+- <file1> - <component>
+- <file2> - <component>
+...
 
-PENDING SUGGESTIONS:
-- [Reviewer Name, Line X]: Suggestion text
-  Status: Not implemented
-
-TEST COVERAGE GAPS:
-- [Area]: Requested test coverage
-  Status: Tests not added
+KEY CHANGES:
+[Brief bullets highlighting main changes from diff]
 ```
 
-After presenting the summary, ask the user:
-1. "Would you like me to analyze any specific discussion thread in detail?"
-2. "Do you want to contribute to any of these open discussions in your review?"
-3. "Would you like step-by-step instructions to reproduce any of these findings in SAIO?"
+**After presenting the overview, Claude MUST ask:**
 
-After fetching, user runs in SAIO:
+```
+=== CHECKPOINT: Review Direction ===
+
+I've fetched and summarized patch <number>. What would you like to do next?
+
+A. Ask questions about the change before proceeding
+B. Proceed to review existing Gerrit comments and discussions
+C. Skip discussion review and go straight to code analysis
+
+Your choice (A/B/C):
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+---
+
+### Step 2: Fetch and Summarize Existing Review Comments (if user chose B)
+
+**Only proceed if user wants to review discussions.**
+
+**User runs in SAIO first:**
 ```bash
+# Checkout the patch to examine it locally
 git review -d <change-number>
 git log --oneline -3
 git show HEAD
 git diff master --stat
 ```
 
-Analyze:
+**Claude will then fetch review comments:**
+
+```bash
+# Fetch all review comments
+curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/comments' | sed '1d'
+
+# Fetch review messages
+curl -s 'https://review.opendev.org/changes/openstack%2Fswift~<change-number>/detail' | sed '1d' | jq -r '.messages[]'
+```
+
+**Claude will analyze and summarize:**
+1. **Open Questions**: Questions from reviewers awaiting answers
+2. **Unresolved Requirements**: Must-fix issues not yet addressed
+3. **Ongoing Debates**: Technical discussions between reviewers
+4. **Pending Suggestions**: Improvements suggested but not implemented
+5. **Test Coverage Gaps**: Areas where reviewers requested tests
+
+Present this summary in a structured format:
+
+```
+=== EXISTING REVIEW DISCUSSIONS ===
+
+OPEN QUESTIONS (X):
+- [Reviewer Name, Line X, File Y]: Question text
+  Status: Awaiting response from author
+
+UNRESOLVED REQUIREMENTS (X):
+- [Reviewer Name]: Requirement description
+  Status: Not addressed in current patchset
+
+ONGOING DEBATES (X):
+- Topic: [Brief description]
+  Participants: [Reviewer 1, Reviewer 2]
+  Summary: [Key points from both sides]
+  Status: No consensus reached
+
+PENDING SUGGESTIONS (X):
+- [Reviewer Name, Line X]: Suggestion text
+  Status: Not implemented
+
+TEST COVERAGE GAPS (X):
+- [Area]: Requested test coverage
+  Status: Tests not added
+```
+
+**After presenting discussion summary, Claude MUST ask:**
+
+```
+=== CHECKPOINT: After Discussion Review ===
+
+I've summarized the existing review discussions. What would you like to do next?
+
+A. Ask about a specific discussion thread in detail
+B. Contribute to these discussions in your review
+C. Proceed to code analysis and testing
+D. Get SAIO testing commands for any discussion points
+
+Your choice (A/B/C/D):
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+---
+
+### Step 3: Code Analysis (only after user confirms to proceed)
+
+**Only proceed if user wants code analysis.**
+
+**Before starting analysis, Claude MUST ask:**
+
+```
+=== CHECKPOINT: Before Code Analysis ===
+
+Ready to start code analysis. This will cover:
+- Commit message quality
+- Affected code components
+- Related patches and dependencies
+
+Should I proceed? (yes/no)
+```
+
+**⛔ STOP HERE - Wait for user confirmation.**
+
+**If yes, analyze:**
+
 1. **Commit message**: Clear? Follows OpenStack guidelines? Explains "why" not just "what"?
 2. **Patch description**: Review Gerrit description
 3. **Affected code**: Which files/components changed?
 4. **Related patches**: Dependencies or related work?
 
-### Step 2: Test Coverage Analysis
+### Step 4: Test Coverage Analysis
 
 **Follow the test pyramid** - verify proper test coverage:
 
@@ -176,13 +312,38 @@ Analyze:
 - For API changes, are there functional tests?
 - Do they cover the happy path and error cases?
 
-User runs:
-```bash
-./.unittests  # Run all unit tests
-./.probetests  # Run all probe tests (if applicable)
+**After test coverage analysis, Claude MUST ask:**
+
+```
+=== CHECKPOINT: After Test Coverage Analysis ===
+
+Test coverage analysis complete. What would you like to do next?
+
+A. See specific test commands to run in SAIO
+B. Continue to code quality analysis
+C. Skip to manual testing instructions
+
+Your choice (A/B/C):
 ```
 
-### Step 3: Code Quality Analysis
+**If user wants test commands (A), provide:**
+
+```bash
+# Run all unit tests
+./.unittests
+
+# Run specific test module (if applicable)
+cd test/unit/<component> && pytest test_<module>.py -v
+
+# Run probe tests (if behavioral changes)
+./.probetests
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+### Step 5: Code Quality Analysis
+
+**Only proceed after user confirms.**
 
 Check for:
 
@@ -203,7 +364,25 @@ Check for:
 - No security vulnerabilities?
 - Follows existing patterns in the codebase?
 
-### Step 4: Edge Cases and Error Paths
+**After code quality analysis, Claude MUST ask:**
+
+```
+=== CHECKPOINT: After Code Quality Analysis ===
+
+Code quality analysis complete. What would you like to do next?
+
+A. Continue to edge case analysis
+B. Skip to manual SAIO testing instructions
+C. Generate the final review summary now
+
+Your choice (A/B/C):
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+### Step 6: Edge Cases and Error Paths
+
+**Only proceed after user confirms.**
 
 For new functions/features, verify:
 - What if inputs are None/empty/invalid?
@@ -212,12 +391,36 @@ For new functions/features, verify:
 - What about concurrent access?
 - Are cleanup operations idempotent?
 
-### Step 5: Manual Testing in SAIO (when applicable)
+**After edge case analysis, Claude MUST ask:**
 
-User runs:
+```
+=== CHECKPOINT: After Edge Case Analysis ===
+
+Edge case analysis complete. What would you like to do next?
+
+A. Get manual SAIO testing instructions
+B. Skip to final review summary generation
+
+Your choice (A/B):
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+### Step 7: Manual Testing in SAIO (when applicable)
+
+**Only provide if user requests testing instructions.**
+
+Provide user with SAIO testing commands:
+
 ```bash
-sudo swift-init main restart  # Restart affected services
-sudo tail -f /var/log/syslog | grep swift  # Monitor logs
+# Restart affected services
+sudo swift-init main restart
+
+# Monitor logs
+sudo tail -f /var/log/syslog | grep swift
+
+# Or check specific service logs
+sudo tail -f /var/log/swift/<service>.log
 ```
 
 Test the feature:
@@ -226,9 +429,43 @@ Test the feature:
 - Check for errors or warnings
 - Verify edge cases work correctly
 
-### Step 6: Generate Review Comment
+**After providing testing commands, Claude MUST ask:**
 
-Structure your Gerrit comment as follows:
+```
+=== CHECKPOINT: After Testing Instructions ===
+
+SAIO testing instructions provided. What would you like to do next?
+
+A. Wait for you to run tests and report results back
+B. Proceed to generate final review summary
+C. Ask questions about how to test specific scenarios
+
+Your choice (A/B/C):
+```
+
+**⛔ STOP HERE - Wait for user response before proceeding.**
+
+### Step 8: Generate Final Review Summary
+
+**Only proceed after user confirms they want the final summary.**
+
+**Before generating, Claude MUST ask:**
+
+```
+=== CHECKPOINT: Final Review Summary ===
+
+Ready to generate your final review summary. This will include:
+- All findings (Requirements, Suggestions, Questions, Conventions, Preferences)
+- Positive observations
+- Recommended vote (+1, 0, -1)
+- Complete review comment formatted for Gerrit
+
+Should I generate the final review summary now? (yes/no)
+```
+
+**⛔ STOP HERE - Wait for user confirmation.**
+
+**If yes, structure your Gerrit comment as follows:**
 
 ---
 
@@ -280,7 +517,7 @@ SUMMARY:
 
 ---
 
-### Step 7: Gerrit Voting
+### Step 9: Gerrit Voting
 
 After commenting, suggest appropriate vote:
 
